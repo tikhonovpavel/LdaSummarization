@@ -269,7 +269,7 @@ class AbsSummarizer(nn.Module):
 
 
     def lda_process(self, batch):
-        result = np.zeros((len(batch), len(batch[0])))
+        result = np.zeros((len(batch), 512))
 
         for i, b in enumerate(batch):
             src_txt = tokenizer.convert_ids_to_tokens(b.tolist())
@@ -292,8 +292,13 @@ class AbsSummarizer(nn.Module):
 
             for i1 in range(len(lda_res)):
                 lda_res_tensor = torch.FloatTensor(lda_res[i1])
-                for i2 in range(len(lda_res[i1])):
-                    top_vec[i1][i2] += lda_res_tensor
+                for i2 in range(len(top_vec[i1])):
+                    try:
+                        top_vec[i1, i2] += lda_res_tensor.cuda()
+                    except IndexError as err:
+                        print(err)
+                        print(top_vec.shape, lda_res.shape)
+                        raise err
 
         dec_state = self.decoder.init_decoder_state(src, top_vec)
         decoder_outputs, state = self.decoder(tgt[:, :-1], top_vec, dec_state)
