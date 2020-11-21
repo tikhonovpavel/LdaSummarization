@@ -105,20 +105,20 @@ def load_dataset(args, corpus_type, shuffle):
     def _lazy_dataset_loader(pt_file, corpus_type, use_topic_modelling):
         dataset = torch.load(pt_file)
 
-        if use_topic_modelling:
-            for article in dataset:
-                # unseen_document = 'How a Pentagon deal became an identity crisis for Google'
-                bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(article['src_txt'])))
-
-                article_topic = sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1])[0]
-                article_topic = article_topic[0]
-                DICTIONARY_SIZE = 30_000
-                article_topic = DICTIONARY_SIZE + article_topic
-
-                article['src'] = [article_topic] + article['src']
-
-                # for index, score in sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1]):
-                #     print("Score: {}\t Topic: {}".format(score, lda_model.print_topic(index, 5)))
+        # if use_topic_modelling:
+        #     for article in dataset:
+        #         # unseen_document = 'How a Pentagon deal became an identity crisis for Google'
+        #         bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(article['src_txt'])))
+        #
+        #         article_topic = sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1])[0]
+        #         article_topic = article_topic[0]
+        #         DICTIONARY_SIZE = 30_000
+        #         article_topic = DICTIONARY_SIZE + article_topic
+        #
+        #         article['src'] = [article_topic] + article['src']
+        #
+        #         # for index, score in sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1]):
+        #         #     print("Score: {}\t Topic: {}".format(score, lda_model.print_topic(index, 5)))
 
         logger.info('Loading %s dataset from %s, number of examples: %d' %
                     (corpus_type, pt_file, len(dataset)))

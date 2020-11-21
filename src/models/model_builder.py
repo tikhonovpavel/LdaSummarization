@@ -1,13 +1,43 @@
 import copy
+import pickle
 
+import nltk
+import gensim
+import numpy as np
 import torch
 import torch.nn as nn
-from pytorch_transformers import BertModel, BertConfig
+from pytorch_transformers import BertModel, BertConfig, BertTokenizer
 from torch.nn.init import xavier_uniform_
 
 from models.decoder import TransformerDecoder
 from models.encoder import Classifier, ExtTransformerEncoder
 from models.optimizers import Optimizer
+
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+
+nltk.download('wordnet')
+
+with open('../topic_modelling_data/dictionary.pkl', 'rb') as f:
+    tm_dictionary = pickle.load(f)
+
+with open('../topic_modelling_data/lda_model.pkl', 'rb') as f:
+    lda_model = pickle.load(f)
+
+stemmer = nltk.SnowballStemmer('english')
+
+
+def lemmatize_stemming(text):
+    return stemmer.stem(nltk.WordNetLemmatizer().lemmatize(text, pos='v'))
+
+
+def preprocess(text):
+    result = []
+    for token in gensim.utils.simple_preprocess(text):
+        if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
+            result.append(lemmatize_stemming(token))
+    return result
+
 
 def build_optim(args, model, checkpoint):
     """ Build optimizer """
@@ -237,8 +267,34 @@ class AbsSummarizer(nn.Module):
 
         self.to(device)
 
+
+    def lda_process(self, batch):
+        result = np.zeros((len(batch), len(batch[0])))
+
+        for i, b in enumerate(batch):
+            src_txt = tokenizer.convert_ids_to_tokens(b.tolist())
+            src_txt = preprocess(' '.join(src_txt))
+
+            bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(src_txt)))
+
+            article_topic = sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1])#[0]
+
+            for index, value in article_topic:
+                result[i, index] = value
+
+        return result
+
     def forward(self, src, tgt, segs, clss, mask_src, mask_tgt, mask_cls):
         top_vec = self.bert(src, segs, mask_src)
+
+        if self.args.use_topic_modelling:
+            lda_res = self.lda_process(src)
+
+            for i1 in range(len(lda_res)):
+                lda_res_tensor = torch.FloatTensor(lda_res[i1])
+                for i2 in range(len(lda_res[i1])):
+                    top_vec[i1][i2] += lda_res_tensor
+
         dec_state = self.decoder.init_decoder_state(src, top_vec)
         decoder_outputs, state = self.decoder(tgt[:, :-1], top_vec, dec_state)
         return decoder_outputs, None
