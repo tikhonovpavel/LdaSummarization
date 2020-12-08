@@ -16,26 +16,26 @@ from nltk.stem.porter import *
 import numpy as np
 np.random.seed(2018)
 
-import nltk
-nltk.download('wordnet')
-
-with open('../topic_modelling_data/dictionary.pkl', 'rb') as f:
-    tm_dictionary = pickle.load(f)
-
-with open('../topic_modelling_data/lda_model.pkl', 'rb') as f:
-    lda_model = pickle.load(f)
-
-stemmer = SnowballStemmer('english')
-
-def lemmatize_stemming(text):
-    return stemmer.stem(WordNetLemmatizer().lemmatize(text, pos='v'))
-
-def preprocess(text):
-    result = []
-    for token in gensim.utils.simple_preprocess(text):
-        if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
-            result.append(lemmatize_stemming(token))
-    return result
+# import nltk
+# nltk.download('wordnet')
+#
+# with open('../topic_modelling_data/dictionary.pkl', 'rb') as f:
+#     tm_dictionary = pickle.load(f)
+#
+# with open('../topic_modelling_data/lda_model.pkl', 'rb') as f:
+#     lda_model = pickle.load(f)
+#
+# stemmer = SnowballStemmer('english')
+#
+# def lemmatize_stemming(text):
+#     return stemmer.stem(WordNetLemmatizer().lemmatize(text, pos='v'))
+#
+# def preprocess(text):
+#     result = []
+#     for token in gensim.utils.simple_preprocess(text):
+#         if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
+#             result.append(lemmatize_stemming(token))
+#     return result
 
 class Batch(object):
     def _pad(self, data, pad_id, width=-1):
@@ -78,11 +78,16 @@ class Batch(object):
             setattr(self, 'mask_tgt', mask_tgt.to(device))
 
 
-            if (is_test):
-                src_str = [x[-2] for x in data]
+            # setattr(self, 'topics', topics.to(device))
+
+
+            if (is_test) or True:
+                src_str = [x[-3] for x in data]
                 setattr(self, 'src_str', src_str)
-                tgt_str = [x[-1] for x in data]
+                tgt_str = [x[-2] for x in data]
                 setattr(self, 'tgt_str', tgt_str)
+                topics = [x[-1] for x in data]
+                setattr(self, 'topics', topics)
 
     def __len__(self):
         return self.batch_size
@@ -245,6 +250,7 @@ class DataIterator(object):
         clss = ex['clss']
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
+        topics = ex['topics']
 
         end_id = [src[-1]]
         src = src[:-1][:self.args.max_pos - 1] + end_id
@@ -257,9 +263,9 @@ class DataIterator(object):
 
 
         if(is_test):
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
         else:
-            return src, tgt, segs, clss, src_sent_labels
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
 
     def batch_buffer(self, data, batch_size):
         minibatch, size_so_far = [], 0
@@ -355,6 +361,7 @@ class TextDataloader(object):
         clss = ex['clss']
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
+        topics = ex['topics']
 
         end_id = [src[-1]]
         src = src[:-1][:self.args.max_pos - 1] + end_id
@@ -365,9 +372,9 @@ class TextDataloader(object):
         # src_txt = src_txt[:max_sent_id]
 
         if (is_test):
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
         else:
-            return src, tgt, segs, clss, src_sent_labels
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
 
     def batch_buffer(self, data, batch_size):
         minibatch, size_so_far = [], 0

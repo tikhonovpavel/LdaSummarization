@@ -15,28 +15,28 @@ from models.optimizers import Optimizer
 
 
 tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-
-nltk.download('wordnet')
-
-with open('../topic_modelling_data/dictionary.pkl', 'rb') as f:
-    tm_dictionary = pickle.load(f)
-
-with open('../topic_modelling_data/lda_model.pkl', 'rb') as f:
-    lda_model = pickle.load(f)
-
-stemmer = nltk.SnowballStemmer('english')
-
-
-def lemmatize_stemming(text):
-    return stemmer.stem(nltk.WordNetLemmatizer().lemmatize(text, pos='v'))
+#
+# nltk.download('wordnet')
+#
+# with open('../topic_modelling_data/dictionary.pkl', 'rb') as f:
+#     tm_dictionary = pickle.load(f)
+#
+# with open('../topic_modelling_data/lda_model.pkl', 'rb') as f:
+#     lda_model = pickle.load(f)
+#
+# stemmer = nltk.SnowballStemmer('english')
 
 
-def preprocess(text):
-    result = []
-    for token in gensim.utils.simple_preprocess(text):
-        if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
-            result.append(lemmatize_stemming(token))
-    return result
+# def lemmatize_stemming(text):
+#     return stemmer.stem(nltk.WordNetLemmatizer().lemmatize(text, pos='v'))
+#
+#
+# def preprocess(text):
+#     result = []
+#     for token in gensim.utils.simple_preprocess(text):
+#         if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
+#             result.append(lemmatize_stemming(token))
+#     return result
 
 
 def build_optim(args, model, checkpoint):
@@ -268,38 +268,51 @@ class AbsSummarizer(nn.Module):
         self.to(device)
 
 
-    def lda_process(self, batch):
-        result = np.zeros((len(batch), 512))
-
-        for i, b in enumerate(batch):
-            src_txt = tokenizer.convert_ids_to_tokens(b.tolist())
-            src_txt = preprocess(' '.join(src_txt))
-
-            bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(src_txt)))
-
-            article_topic = sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1])#[0]
-
-            for index, value in article_topic:
-                result[i, index] = value
-
-        return result
+    # def lda_process(self, batch):
+    #     result = np.zeros((len(batch), 512))
+    #
+    #     for i, b in enumerate(batch):
+    #         src_txt = tokenizer.convert_ids_to_tokens(b.tolist())
+    #         src_txt = preprocess(' '.join(src_txt))
+    #
+    #         bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(src_txt)))
+    #
+    #         article_topic = sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1])  # [0]
+    #
+    #         for index, value in article_topic[:1]:
+    #             result[i, index] = value
+    #
+    #     return result
 
     def forward(self, src, tgt, segs, clss, mask_src, mask_tgt, mask_cls):
         top_vec = self.bert(src, segs, mask_src)
 
-        if self.args.use_topic_modelling:
-            lda_res = self.lda_process(src)
+        for i, b in enumerate(tgt):
+            tgt_txt = tokenizer.convert_ids_to_tokens(b.tolist())
+            print(tgt_txt)
+            a = 1 + 2
 
-            for i1 in range(len(lda_res)):
-                lda_res_tensor = torch.FloatTensor(lda_res[i1])
-                for i2 in range(len(top_vec[i1])):
-                    try:
-                        top_vec[i1, i2] += lda_res_tensor.cuda()
-                    except IndexError as err:
-                        print(err)
-                        print(top_vec.shape, lda_res.shape)
-                        raise err
+        # # add small normal distributed noise
+        # noise = torch.normal(torch.zeros(top_vec.shape), torch.ones(top_vec.shape) / 2)
+        # noise = noise.cuda()
+        # top_vec += noise
+
+        # if self.args.use_topic_modelling:
+        #     lda_res = self.lda_process(src)
+        #
+        #     for i1 in range(len(lda_res)):
+        #         lda_res_tensor = torch.FloatTensor(lda_res[i1])
+        #         for i2 in range(len(top_vec[i1])):
+        #             try:
+        #                 top_vec[i1, i2] += lda_res_tensor.cuda()
+        #             except IndexError as err:
+        #                 print(err)
+        #                 print(top_vec.shape, lda_res.shape)
+        #                 raise err
 
         dec_state = self.decoder.init_decoder_state(src, top_vec)
         decoder_outputs, state = self.decoder(tgt[:, :-1], top_vec, dec_state)
+
+        print('decoder', decoder_outputs.shape)
+
         return decoder_outputs, None

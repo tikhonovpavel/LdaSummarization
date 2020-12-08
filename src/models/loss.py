@@ -5,11 +5,57 @@ This includes: LossComputeBase and the standard NMTLossCompute, and
                sharded loss compute stuff.
 """
 from __future__ import division
+
+import pickle
+
+import gensim
+import nltk
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from pytorch_transformers import BertTokenizer
+
+from gensim.parsing.preprocessing import preprocess_string, strip_punctuation, strip_numeric
 
 from models.reporter import Statistics
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+
+nltk.download('wordnet')
+
+with open('f:/workspace/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
+    lda_model, tm_dictionary = pickle.load(f)
+
+wn_lemmatizer = nltk.WordNetLemmatizer()
+
+lda_topics = lda_model.show_topics(num_topics=-1, num_words=10)
+
+topics_words = []
+filters = [lambda x: x.lower(), strip_punctuation, strip_numeric]
+
+for topic in lda_topics:
+    print(topic)
+    topics_words.append(preprocess_string(topic[1], filters))
+
+
+def lemmatize(text):#lemmatize_stemming(text):
+    return wn_lemmatizer.lemmatize(text, pos='v')  # stemmer.stem(WordNetLemmatizer().lemmatize(text, pos='v'))
+
+
+def preprocess(text):
+    result = []
+    for token in gensim.utils.simple_preprocess(text):
+        if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
+            result.append(lemmatize(token))
+    return result
+
+
+preprocessed_vocab = [preprocess(x) for x in tokenizer.vocab.keys()]
+preprocessed_vocab = [x[0] if len(x) > 0 else None for x in preprocessed_vocab]
+
+topics_words_indexes = [[
+    next(index for index, word in enumerate(preprocessed_vocab) if word == x) for x in y
+] for y in topics_words]
 
 
 def abs_loss(generator, symbols, vocab_size, device, train=True, label_smoothing=0.0):
@@ -176,16 +222,52 @@ class LabelSmoothingLoss(nn.Module):
         self.register_buffer('one_hot', one_hot.unsqueeze(0))
         self.confidence = 1.0 - label_smoothing
 
-    def forward(self, output, target):
+        self.cosine_embedding_loss = nn.CosineEmbeddingLoss()
+
+    def forward(self, output_param, target_param, generator, src_topics):
         """
         output (FloatTensor): batch_size x n_classes
         target (LongTensor): batch_size
         """
-        model_prob = self.one_hot.repeat(target.size(0), 1)
-        model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
-        model_prob.masked_fill_((target == self.padding_idx).unsqueeze(1), 0)
+        loss = 0
 
-        return F.kl_div(output, model_prob, reduction='sum')
+        # output_text = tokenizer.convert_ids_to_tokens(output_param[0].tolist())
+        # print(tgt_txt)
+        # a = 1 + 2
+
+        for i in range(output_param.shape[0]):
+            output = generator(output_param[i])
+            target = target_param[i]
+
+            model_prob = self.one_hot.repeat(target.size(0), 1)
+            model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
+            model_prob.masked_fill_((target == self.padding_idx).unsqueeze(1), 0)
+
+            print(output.argmax(1)[:10], '\n', model_prob.argmax(1)[:10], )
+            print()
+
+            output_text = tokenizer.convert_ids_to_tokens(output.argmax(1).tolist())
+
+            output_bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(output_text)))
+            output_article_topic = sorted(lda_model[output_bow_vector], key=lambda tup: -1 * tup[1])
+
+            target_topics_one_hot = torch.zeros(len(topics_words))
+            output_topics_one_hot = torch.zeros(len(topics_words))
+
+            for index, value in src_topics:
+                target_topics_one_hot[index] = torch.FloatTensor([value])
+
+            for index, value in output_article_topic:
+                output_topics_one_hot[index] = torch.FloatTensor([value])
+
+            loss += F.kl_div(output, model_prob, reduction='sum') + \
+                    0.5 * (F.kl_div(output_topics_one_hot, target_topics_one_hot, reduction='sum') ** 2)
+
+            # # for every top word for the topic of input text - calculate its KL-divergence with model output text
+            # for word in topics_words_indexes:
+            #     loss += F.kl_div(output, model_prob, reduction='sum') + lda_model.
+
+        return loss
 
 
 class NMTLossCompute(LossComputeBase):
@@ -197,14 +279,18 @@ class NMTLossCompute(LossComputeBase):
                  label_smoothing=0.0):
         super(NMTLossCompute, self).__init__(generator, symbols['PAD'])
         self.sparse = not isinstance(generator[1], nn.LogSoftmax)
+
         if label_smoothing > 0:
-            self.criterion = LabelSmoothingLoss(
+            criterion = LabelSmoothingLoss(
                 label_smoothing, vocab_size, ignore_index=self.padding_idx
             )
         else:
-            self.criterion = nn.NLLLoss(
-                ignore_index=self.padding_idx, reduction='sum'
-            )
+            raise NotImplementedError()
+            # criterion = nn.NLLLoss(
+            #     ignore_index=self.padding_idx, reduction='sum'
+            # )
+
+        self.criterion = criterion
 
     def _make_shard_state(self, batch, output):
         return {
@@ -217,7 +303,7 @@ class NMTLossCompute(LossComputeBase):
         scores = self.generator(bottled_output)
         gtruth =target.contiguous().view(-1)
 
-        loss = self.criterion(scores, gtruth)
+        loss = self.criterion(output, target, self.generator, batch.topics)
 
         stats = self._stats(loss.clone(), scores, gtruth)
 
