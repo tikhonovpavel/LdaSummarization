@@ -33,6 +33,8 @@ lda_topics = lda_model.show_topics(num_topics=-1, num_words=10)
 topics_words = []
 filters = [lambda x: x.lower(), strip_punctuation, strip_numeric]
 
+step_n = 0
+
 for topic in lda_topics:
     print(topic)
     topics_words.append(preprocess_string(topic[1], filters))
@@ -279,6 +281,12 @@ class LabelSmoothingLoss(nn.Module):
             # more divergence - less reward
             reward = -(F.kl_div(output_topics_one_hot, target_topics_one_hot) ** 2)
             # ---- end of reward calculation ----
+
+            global step_n
+            if (step_n ) % 100 == 0:
+                target_text = tokenizer.convert_ids_to_tokens(target.tolist())
+                print('Target:\n{}\n\nOutput:\n{}'.format(' '.join(target_text), ' '.join(output_text)), '\n')
+                step_n += 1
 
             vanilla_loss = F.kl_div(output, model_prob, reduction='sum')
 

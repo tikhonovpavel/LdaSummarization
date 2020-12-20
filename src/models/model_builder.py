@@ -333,6 +333,6 @@ class AbsSummarizer(nn.Module):
         dec_state = self.decoder.init_decoder_state(src, top_vec)
         decoder_outputs, state = self.decoder(tgt[:, :-1], top_vec, dec_state)
 
-        print('decoder', decoder_outputs.shape)
+        # print('decoder', decoder_outputs.shape)
 
         return decoder_outputs, None
