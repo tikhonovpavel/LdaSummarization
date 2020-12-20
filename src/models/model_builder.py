@@ -142,6 +142,23 @@ def get_generator(vocab_size, dec_hidden_size, device):
 
     return generator
 
+
+# class Flatten(nn.Module):
+#     def forward(self, inp):
+#         return inp.view(inp.size(0) * inp.size(1))
+
+
+# def get_topical_output(num_topics, dec_hidden_size, device):
+#     gen_func = nn.LogSoftmax(dim=-1)
+#     topical_output = nn.Sequential(
+#         nn.Linear(dec_hidden_size, num_topics),
+#         gen_func
+#     )
+#     topical_output.to(device)
+#
+#     return topical_output
+
+
 class Bert(nn.Module):
     def __init__(self, large, temp_dir, finetune=False):
         super(Bert, self).__init__()
@@ -242,6 +259,8 @@ class AbsSummarizer(nn.Module):
         self.generator = get_generator(self.vocab_size, self.args.dec_hidden_size, device)
         self.generator[0].weight = self.decoder.embeddings.weight
 
+        self.topical_output = None#get_topical_output(15, self.args.dec_hidden_size, device)
+        # self.topical_output[0].weight = self.decoder.embeddings.weight
 
         if checkpoint is not None:
             self.load_state_dict(checkpoint['model'], strict=True)
@@ -264,6 +283,7 @@ class AbsSummarizer(nn.Module):
                 tgt_embeddings.weight = copy.deepcopy(self.bert.model.embeddings.word_embeddings.weight)
                 self.decoder.embeddings = tgt_embeddings
                 self.generator[0].weight = self.decoder.embeddings.weight
+                # self.topical_output[0].weight = self.decoder.embeddings.weight
 
         self.to(device)
 
@@ -287,10 +307,10 @@ class AbsSummarizer(nn.Module):
     def forward(self, src, tgt, segs, clss, mask_src, mask_tgt, mask_cls):
         top_vec = self.bert(src, segs, mask_src)
 
-        for i, b in enumerate(tgt):
-            tgt_txt = tokenizer.convert_ids_to_tokens(b.tolist())
-            print(tgt_txt)
-            a = 1 + 2
+        # for i, b in enumerate(tgt):
+        #     tgt_txt = tokenizer.convert_ids_to_tokens(b.tolist())
+        #     print(tgt_txt)
+        #     a = 1 + 2
 
         # # add small normal distributed noise
         # noise = torch.normal(torch.zeros(top_vec.shape), torch.ones(top_vec.shape) / 2)

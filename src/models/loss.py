@@ -58,9 +58,9 @@ topics_words_indexes = [[
 ] for y in topics_words]
 
 
-def abs_loss(generator, symbols, vocab_size, device, train=True, label_smoothing=0.0):
+def abs_loss(generator, topical_output, symbols, vocab_size, device, train=True, label_smoothing=0.0):
     compute = NMTLossCompute(
-        generator, symbols, vocab_size,
+        generator, topical_output, symbols, vocab_size,
         label_smoothing=label_smoothing if train else 0.0)
     compute.to(device)
     return compute
@@ -87,9 +87,10 @@ class LossComputeBase(nn.Module):
         normalzation (str): normalize by "sents" or "tokens"
     """
 
-    def __init__(self, generator, pad_id):
+    def __init__(self, generator, topical_output, pad_id):
         super(LossComputeBase, self).__init__()
         self.generator = generator
+        self.topical_output = topical_output
         self.padding_idx = pad_id
 
 
@@ -224,16 +225,33 @@ class LabelSmoothingLoss(nn.Module):
 
         self.cosine_embedding_loss = nn.CosineEmbeddingLoss()
 
-    def forward(self, output_param, target_param, generator, src_topics):
+    def pgloss(self, src, trg, reward):
+        """
+        Returns a policy gradient loss
+        :param src: seq_len
+        :param trg: seq_len
+        :param reward: batch_size (discriminator reward for each sentence, applied to each token of the corresponding sentence)
+        :return loss: policy loss
+        """
+
+        srq_len, batch_size = src.size()
+
+        out = self.forward(src, trg,
+                           teacher_forcing_ratio=0.5).permute(1, 0, 2)  # batch * seq * vocab
+        out = F.log_softmax(out, dim=2)
+        target_onehot = F.one_hot(trg.permute(1, 0), self.encoder.input_dim).float()  # batch * seq * vocab
+        pred = torch.sum(out * target_onehot, dim=-1)  # batch_size * seq_len
+        pred = torch.sum(pred, dim=-1)
+        loss = -torch.sum(pred * reward)
+
+        return loss / batch_size
+
+    def forward(self, output_param, target_param, generator, topical_output, src_topics):
         """
         output (FloatTensor): batch_size x n_classes
         target (LongTensor): batch_size
         """
         loss = 0
-
-        # output_text = tokenizer.convert_ids_to_tokens(output_param[0].tolist())
-        # print(tgt_txt)
-        # a = 1 + 2
 
         for i in range(output_param.shape[0]):
             output = generator(output_param[i])
@@ -243,9 +261,7 @@ class LabelSmoothingLoss(nn.Module):
             model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
             model_prob.masked_fill_((target == self.padding_idx).unsqueeze(1), 0)
 
-            print(output.argmax(1)[:10], '\n', model_prob.argmax(1)[:10], )
-            print()
-
+            # ---- calculate reward ----
             output_text = tokenizer.convert_ids_to_tokens(output.argmax(1).tolist())
 
             output_bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(output_text)))
@@ -260,12 +276,16 @@ class LabelSmoothingLoss(nn.Module):
             for index, value in output_article_topic:
                 output_topics_one_hot[index] = torch.FloatTensor([value])
 
-            loss += F.kl_div(output, model_prob, reduction='sum') + \
-                    0.5 * (F.kl_div(output_topics_one_hot, target_topics_one_hot, reduction='sum') ** 2)
+            # more divergence - less reward
+            reward = -(F.kl_div(output_topics_one_hot, target_topics_one_hot) ** 2)
+            # ---- end of reward calculation ----
 
-            # # for every top word for the topic of input text - calculate its KL-divergence with model output text
-            # for word in topics_words_indexes:
-            #     loss += F.kl_div(output, model_prob, reduction='sum') + lda_model.
+            vanilla_loss = F.kl_div(output, model_prob, reduction='sum')
+
+            rl_loss = torch.sum(output * reward)
+            rl_loss = -0.05 * rl_loss
+
+            loss += vanilla_loss + rl_loss
 
         return loss
 
@@ -275,9 +295,9 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
 
-    def __init__(self, generator, symbols, vocab_size,
+    def __init__(self, generator, topical_output, symbols, vocab_size,
                  label_smoothing=0.0):
-        super(NMTLossCompute, self).__init__(generator, symbols['PAD'])
+        super(NMTLossCompute, self).__init__(generator, topical_output, symbols['PAD'])
         self.sparse = not isinstance(generator[1], nn.LogSoftmax)
 
         if label_smoothing > 0:
@@ -303,7 +323,7 @@ class NMTLossCompute(LossComputeBase):
         scores = self.generator(bottled_output)
         gtruth =target.contiguous().view(-1)
 
-        loss = self.criterion(output, target, self.generator, batch.topics)
+        loss = self.criterion(output, target, self.generator, self.topical_output, batch.topics)
 
         stats = self._stats(loss.clone(), scores, gtruth)
 
