@@ -282,18 +282,20 @@ class LabelSmoothingLoss(nn.Module):
             reward = -(F.kl_div(output_topics_one_hot, target_topics_one_hot) ** 2)
             # ---- end of reward calculation ----
 
-            global step_n
-            if (step_n ) % 100 == 0:
-                target_text = tokenizer.convert_ids_to_tokens(target.tolist())
-                print('Target:\n{}\n\nOutput:\n{}'.format(' '.join(target_text), ' '.join(output_text)), '\n')
-                step_n += 1
-
             vanilla_loss = F.kl_div(output, model_prob, reduction='sum')
 
-            rl_loss = torch.sum(output * reward)
+            rl_loss = torch.sum(output * reward, dtype=torch.float)
             rl_loss = -0.05 * rl_loss
 
-            loss += vanilla_loss + rl_loss
+            # rl_loss * x = 0.25 * vanilla_loss  =>  x = 0.25 * vanilla_loss / rl_loss
+            loss += (vanilla_loss * 0.75 + 0.25 * vanilla_loss / rl_loss)
+
+            global step_n
+            if step_n % 1000 == 0:
+                target_text = tokenizer.convert_ids_to_tokens(target.tolist())
+                print('Loss: vanilla: {} ({}), rl: {} ({}), {}\nTarget:\n{}\n\nOutput:\n{}'.format(vanilla_loss, 0.75 * vanilla_loss, rl_loss, 0.25 * vanilla_loss / rl_loss, loss, ' '.join(target_text), ' '.join(output_text)), '\n')
+
+            step_n += 1
 
         return loss
 
