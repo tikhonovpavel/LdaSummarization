@@ -23,7 +23,7 @@ tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=Tru
 
 nltk.download('wordnet')
 
-with open('f:/workspace/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
+with open('/content/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
     lda_model, tm_dictionary = pickle.load(f)
 
 wn_lemmatizer = nltk.WordNetLemmatizer()
@@ -285,15 +285,21 @@ class LabelSmoothingLoss(nn.Module):
             vanilla_loss = F.kl_div(output, model_prob, reduction='sum')
 
             rl_loss = torch.sum(output * reward, dtype=torch.float)
-            rl_loss = -0.05 * rl_loss
+            #rl_loss = -0.05 * rl_loss
 
-            # rl_loss * x = 0.25 * vanilla_loss  =>  x = 0.25 * vanilla_loss / rl_loss
-            loss += (vanilla_loss * 0.75 + 0.25 * vanilla_loss / rl_loss)
+            rl_loss_percentage = 0.5
+
+            # rl_loss * x = rl_loss_percentage * vanilla_loss  =>  x = rl_loss_percentage * vanilla_loss / rl_loss
+            rl_coeff = float(rl_loss_percentage * vanilla_loss / rl_loss)
+
+            loss += (vanilla_loss * (1 - rl_loss_percentage) + rl_loss * rl_coeff)
 
             global step_n
             if step_n % 1000 == 0:
                 target_text = tokenizer.convert_ids_to_tokens(target.tolist())
-                print('Loss: vanilla: {} ({}), rl: {} ({}), {}\nTarget:\n{}\n\nOutput:\n{}'.format(vanilla_loss, 0.75 * vanilla_loss, rl_loss, 0.25 * vanilla_loss / rl_loss, loss, ' '.join(target_text), ' '.join(output_text)), '\n')
+                print('Loss: vanilla: {} ({}), rl: {} ({}), {}\nTarget:\n{}\n\nOutput:\n{}'.format(
+                    vanilla_loss, (1 - rl_loss_percentage) * vanilla_loss, rl_loss, rl_loss * rl_coeff, loss, ' '.join(target_text), ' '.join(output_text)
+                    ), '\n')
 
             step_n += 1
 
