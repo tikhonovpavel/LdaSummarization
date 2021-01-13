@@ -43,7 +43,7 @@ def build_optim(args, model, checkpoint):
     """ Build optimizer """
 
     if checkpoint is not None:
-        optim = checkpoint['optim'][0]
+        optim = checkpoint['optims'][0]
         saved_optimizer_state_dict = optim.optimizer.state_dict()
         optim.optimizer.load_state_dict(saved_optimizer_state_dict)
         if args.visible_gpus != '-1':
@@ -141,22 +141,6 @@ def get_generator(vocab_size, dec_hidden_size, device):
     generator.to(device)
 
     return generator
-
-
-# class Flatten(nn.Module):
-#     def forward(self, inp):
-#         return inp.view(inp.size(0) * inp.size(1))
-
-
-# def get_topical_output(num_topics, dec_hidden_size, device):
-#     gen_func = nn.LogSoftmax(dim=-1)
-#     topical_output = nn.Sequential(
-#         nn.Linear(dec_hidden_size, num_topics),
-#         gen_func
-#     )
-#     topical_output.to(device)
-#
-#     return topical_output
 
 
 class Bert(nn.Module):

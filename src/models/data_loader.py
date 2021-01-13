@@ -250,7 +250,12 @@ class DataIterator(object):
         clss = ex['clss']
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
-        topics = ex['topics']
+
+        try:
+            topics = ex['topics']
+        except KeyError:
+            print('Warning: topics are not presented!')
+            topics = None
 
         end_id = [src[-1]]
         src = src[:-1][:self.args.max_pos - 1] + end_id

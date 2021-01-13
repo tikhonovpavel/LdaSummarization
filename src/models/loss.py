@@ -23,8 +23,12 @@ tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=Tru
 
 nltk.download('wordnet')
 
-with open('/content/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
-    lda_model, tm_dictionary = pickle.load(f)
+try:
+    with open('f:/workspace/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
+        lda_model, tm_dictionary = pickle.load(f)
+except FileNotFoundError:
+    with open('/content/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
+        lda_model, tm_dictionary = pickle.load(f)
 
 wn_lemmatizer = nltk.WordNetLemmatizer()
 
@@ -272,11 +276,15 @@ class LabelSmoothingLoss(nn.Module):
             target_topics_one_hot = torch.zeros(len(topics_words))
             output_topics_one_hot = torch.zeros(len(topics_words))
 
-            for index, value in src_topics:
-                target_topics_one_hot[index] = torch.FloatTensor([value])
+            top_target_topic = sorted(src_topics, key=lambda tup: -1 * tup[1])[0]
+            target_topics_one_hot[top_target_topic[0]] = torch.FloatTensor([1])
+            # for index, value in src_topics:
+            #     target_topics_one_hot[index] = torch.FloatTensor([value])
 
-            for index, value in output_article_topic:
-                output_topics_one_hot[index] = torch.FloatTensor([value])
+            top_output_topic = sorted(output_article_topic, key=lambda tup: -1 * tup[1])[0]
+            output_topics_one_hot[top_output_topic[0]] = torch.FloatTensor([1])
+            # for index, value in output_article_topic:
+            #     output_topics_one_hot[index] = torch.FloatTensor([value])
 
             # more divergence - less reward
             reward = -(F.kl_div(output_topics_one_hot, target_topics_one_hot) ** 2)
