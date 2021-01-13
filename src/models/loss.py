@@ -282,12 +282,12 @@ class LabelSmoothingLoss(nn.Module):
             #     target_topics_one_hot[index] = torch.FloatTensor([value])
 
             top_output_topic = sorted(output_article_topic, key=lambda tup: -1 * tup[1])[0]
-            output_topics_one_hot[top_output_topic[0]] = torch.FloatTensor([1])
+            output_topics_one_hot[top_output_topic[0]] = torch.FloatTensor([top_output_topic[1]])
             # for index, value in output_article_topic:
             #     output_topics_one_hot[index] = torch.FloatTensor([value])
 
             # more divergence - less reward
-            reward = -(F.kl_div(output_topics_one_hot, target_topics_one_hot) ** 2)
+            reward = -(F.binary_cross_entropy(output_topics_one_hot, target_topics_one_hot) ** 2)
             # ---- end of reward calculation ----
 
             vanilla_loss = F.kl_div(output, model_prob, reduction='sum')
