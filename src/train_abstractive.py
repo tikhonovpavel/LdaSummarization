@@ -7,6 +7,7 @@ from __future__ import division
 import argparse
 import glob
 import os
+import pickle
 import random
 import signal
 import time
@@ -26,7 +27,14 @@ from others.logging import logger, init_logger
 model_flags = ['hidden_size', 'ff_size', 'heads', 'emb_size', 'enc_layers', 'enc_hidden_size', 'enc_ff_size',
                'dec_layers', 'dec_hidden_size', 'dec_ff_size', 'encoder', 'ff_actv', 'use_interval']
 
-NUM_OF_TOPICS = 10
+try:
+    with open('f:/workspace/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
+        lda_model, tm_dictionary = pickle.load(f)
+except FileNotFoundError:
+    with open('/content/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
+        lda_model, tm_dictionary = pickle.load(f)
+
+NUM_OF_TOPICS = lda_model.num_topics
 
 
 def str2bool(v):

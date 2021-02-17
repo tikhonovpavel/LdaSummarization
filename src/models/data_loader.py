@@ -320,8 +320,15 @@ class TextDataloader(object):
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
 
+        if isinstance(ex['topics'], tuple):
+            topic_n = ex['topics'][0]
+        elif isinstance(ex['topics'], list):
+            topic_n = max(ex['topics'], key=lambda x: x[1])[0]
+        else:
+            raise NotImplementedError()
+
         end_id = [src[-1]]
-        src = src[:-1][:self.args.max_pos - 2] + max(ex['topics']) + end_id
+        src = src[:-1][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
