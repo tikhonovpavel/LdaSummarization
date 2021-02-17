@@ -26,6 +26,8 @@ from others.logging import logger, init_logger
 model_flags = ['hidden_size', 'ff_size', 'heads', 'emb_size', 'enc_layers', 'enc_hidden_size', 'enc_ff_size',
                'dec_layers', 'dec_hidden_size', 'dec_ff_size', 'encoder', 'ff_actv', 'use_interval']
 
+NUM_OF_TOPICS = 10
+
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -190,7 +192,7 @@ def validate(args, device_id, pt, step):
     symbols = {'BOS': tokenizer.vocab['[unused0]'], 'EOS': tokenizer.vocab['[unused1]'],
                'PAD': tokenizer.vocab['[PAD]'], 'EOQ': tokenizer.vocab['[unused2]']}
 
-    valid_loss = abs_loss(model.generator, model.topical_output, symbols, model.vocab_size, train=False, device=device)
+    valid_loss = abs_loss(model.generator, symbols, model.vocab_size, train=False, device=device)
 
     trainer = build_trainer(args, device_id, model, None, valid_loss)
     stats = trainer.validate(valid_iter, step)
@@ -221,6 +223,10 @@ def test_abs(args, device_id, pt, step):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True, cache_dir=args.temp_dir)
     symbols = {'BOS': tokenizer.vocab['[unused0]'], 'EOS': tokenizer.vocab['[unused1]'],
                'PAD': tokenizer.vocab['[PAD]'], 'EOQ': tokenizer.vocab['[unused2]']}
+
+    for topic_n in range(NUM_OF_TOPICS):
+        symbols['TOPIC_{}'.format(topic_n)] = tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]
+
     predictor = build_predictor(args, tokenizer, symbols, model, logger)
     predictor.translate(test_iter, step)
 
@@ -249,6 +255,10 @@ def test_text_abs(args, device_id, pt, step):
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True, cache_dir=args.temp_dir)
     symbols = {'BOS': tokenizer.vocab['[unused0]'], 'EOS': tokenizer.vocab['[unused1]'],
                'PAD': tokenizer.vocab['[PAD]'], 'EOQ': tokenizer.vocab['[unused2]']}
+
+    for topic_n in range(NUM_OF_TOPICS):
+        symbols['TOPIC_{}'.format(topic_n)] = tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]
+
     predictor = build_predictor(args, tokenizer, symbols, model, logger)
     predictor.translate(test_iter, step)
 
@@ -326,7 +336,10 @@ def train_abs_single(args, device_id):
     symbols = {'BOS': tokenizer.vocab['[unused0]'], 'EOS': tokenizer.vocab['[unused1]'],
                'PAD': tokenizer.vocab['[PAD]'], 'EOQ': tokenizer.vocab['[unused2]']}
 
-    train_loss = abs_loss(model.generator, model.topical_output, symbols, model.vocab_size, device, train=True,
+    for topic_n in range(NUM_OF_TOPICS):
+        symbols['TOPIC_{}'.format(topic_n)] = tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]
+
+    train_loss = abs_loss(model.generator, symbols, model.vocab_size, device, train=True,
                           label_smoothing=args.label_smoothing)
 
     trainer = build_trainer(args, device_id, model, optim, train_loss)

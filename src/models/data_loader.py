@@ -1,41 +1,16 @@
 import bisect
 import gc
 import glob
-import pickle
 import random
 
 import torch
+from pytorch_transformers import BertTokenizer
 
 from others.logging import logger
 
-import gensim
-from gensim.utils import simple_preprocess
-from gensim.parsing.preprocessing import STOPWORDS
-from nltk.stem import WordNetLemmatizer, SnowballStemmer
-from nltk.stem.porter import *
-import numpy as np
-np.random.seed(2018)
 
-# import nltk
-# nltk.download('wordnet')
-#
-# with open('../topic_modelling_data/dictionary.pkl', 'rb') as f:
-#     tm_dictionary = pickle.load(f)
-#
-# with open('../topic_modelling_data/lda_model.pkl', 'rb') as f:
-#     lda_model = pickle.load(f)
-#
-# stemmer = SnowballStemmer('english')
-#
-# def lemmatize_stemming(text):
-#     return stemmer.stem(WordNetLemmatizer().lemmatize(text, pos='v'))
-#
-# def preprocess(text):
-#     result = []
-#     for token in gensim.utils.simple_preprocess(text):
-#         if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
-#             result.append(lemmatize_stemming(token))
-#     return result
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+
 
 class Batch(object):
     def _pad(self, data, pad_id, width=-1):
@@ -58,26 +33,13 @@ class Batch(object):
             tgt = torch.tensor(self._pad(pre_tgt, 0))
 
             segs = torch.tensor(self._pad(pre_segs, 0))
+            mask_src = 1 - (src == 0)
+            mask_tgt = 1 - (tgt == 0)
 
-            try:
-                mask_src = 1 - (src == 0)
-                mask_tgt = 1 - (tgt == 0)
-            except RuntimeError as err:
-                if 'Subtraction, the `-` operator, with a bool tensor is not supported' not in str(err):
-                    raise err
-                mask_src = ~(src == 0)
-                mask_tgt = ~(tgt == 0)
 
             clss = torch.tensor(self._pad(pre_clss, -1))
             src_sent_labels = torch.tensor(self._pad(pre_src_sent_labels, 0))
-
-            try:
-                mask_cls = 1 - (clss == -1)
-            except RuntimeError as err:
-                if 'Subtraction, the `-` operator, with a bool tensor is not supported' not in str(err):
-                    raise err
-                mask_cls = ~(clss == -1)
-
+            mask_cls = 1 - (clss == -1)
             clss[clss == -1] = 0
             setattr(self, 'clss', clss.to(device))
             setattr(self, 'mask_cls', mask_cls.to(device))
@@ -91,16 +53,11 @@ class Batch(object):
             setattr(self, 'mask_tgt', mask_tgt.to(device))
 
 
-            # setattr(self, 'topics', topics.to(device))
-
-
-            if (is_test) or True:
-                src_str = [x[-3] for x in data]
+            if (is_test):
+                src_str = [x[-2] for x in data]
                 setattr(self, 'src_str', src_str)
-                tgt_str = [x[-2] for x in data]
+                tgt_str = [x[-1] for x in data]
                 setattr(self, 'tgt_str', tgt_str)
-                topics = [x[-1] for x in data]
-                setattr(self, 'topics', topics)
 
     def __len__(self):
         return self.batch_size
@@ -112,7 +69,6 @@ def load_dataset(args, corpus_type, shuffle):
     """
     Dataset generator. Don't do extra stuff here, like printing,
     because they will be postponed to the first loading time.
-
     Args:
         corpus_type: 'train' or 'valid'
     Returns:
@@ -120,24 +76,8 @@ def load_dataset(args, corpus_type, shuffle):
     """
     assert corpus_type in ["train", "valid", "test"]
 
-    def _lazy_dataset_loader(pt_file, corpus_type, use_topic_modelling):
+    def _lazy_dataset_loader(pt_file, corpus_type):
         dataset = torch.load(pt_file)
-
-        # if use_topic_modelling:
-        #     for article in dataset:
-        #         # unseen_document = 'How a Pentagon deal became an identity crisis for Google'
-        #         bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(article['src_txt'])))
-        #
-        #         article_topic = sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1])[0]
-        #         article_topic = article_topic[0]
-        #         DICTIONARY_SIZE = 30_000
-        #         article_topic = DICTIONARY_SIZE + article_topic
-        #
-        #         article['src'] = [article_topic] + article['src']
-        #
-        #         # for index, score in sorted(lda_model[bow_vector], key=lambda tup: -1 * tup[1]):
-        #         #     print("Score: {}\t Topic: {}".format(score, lda_model.print_topic(index, 5)))
-
         logger.info('Loading %s dataset from %s, number of examples: %d' %
                     (corpus_type, pt_file, len(dataset)))
         return dataset
@@ -149,11 +89,11 @@ def load_dataset(args, corpus_type, shuffle):
             random.shuffle(pts)
 
         for pt in pts:
-            yield _lazy_dataset_loader(pt, corpus_type, args.use_topic_modelling)
+            yield _lazy_dataset_loader(pt, corpus_type)
     else:
         # Only one inputters.*Dataset, simple!
         pt = args.bert_data_path + '.' + corpus_type + '.pt'
-        yield _lazy_dataset_loader(pt, corpus_type, args.use_topic_modelling)
+        yield _lazy_dataset_loader(pt, corpus_type)
 
 
 def abs_batch_size_fn(new, count):
@@ -195,7 +135,6 @@ class Dataloader(object):
         self.device = device
         self.shuffle = shuffle
         self.is_test = is_test
-        self.use_topic_modelling = args.use_topic_modelling
         self.cur_iter = self._next_dataset_iterator(datasets)
         assert self.cur_iter is not None
 
@@ -264,14 +203,15 @@ class DataIterator(object):
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
 
-        try:
-            topics = ex['topics']
-        except KeyError:
-            print('Warning: topics are not presented!')
-            topics = None
+        if isinstance(ex['topics'], tuple):
+            topic_n = ex['topics'][0]
+        elif isinstance(ex['topics'], list):
+            topic_n = max(ex['topics'], key=lambda x: x[1])[0]
+        else:
+            raise NotImplementedError()
 
         end_id = [src[-1]]
-        src = src[:-1][:self.args.max_pos - 1] + end_id
+        src = src[:-1][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
@@ -281,9 +221,9 @@ class DataIterator(object):
 
 
         if(is_test):
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt
         else:
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
+            return src, tgt, segs, clss, src_sent_labels
 
     def batch_buffer(self, data, batch_size):
         minibatch, size_so_far = [], 0
@@ -379,10 +319,9 @@ class TextDataloader(object):
         clss = ex['clss']
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
-        topics = ex['topics']
 
         end_id = [src[-1]]
-        src = src[:-1][:self.args.max_pos - 1] + end_id
+        src = src[:-1][:self.args.max_pos - 2] + max(ex['topics']) + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
@@ -390,9 +329,9 @@ class TextDataloader(object):
         # src_txt = src_txt[:max_sent_id]
 
         if (is_test):
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt
         else:
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
+            return src, tgt, segs, clss, src_sent_labels
 
     def batch_buffer(self, data, batch_size):
         minibatch, size_so_far = [], 0

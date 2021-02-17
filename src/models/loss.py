@@ -1,72 +1,19 @@
 """
 This file handles the details of the loss function during training.
-
 This includes: LossComputeBase and the standard NMTLossCompute, and
                sharded loss compute stuff.
 """
 from __future__ import division
-
-import pickle
-
-import gensim
-import nltk
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_transformers import BertTokenizer
-
-from gensim.parsing.preprocessing import preprocess_string, strip_punctuation, strip_numeric
 
 from models.reporter import Statistics
 
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
 
-nltk.download('wordnet')
-
-try:
-    with open('f:/workspace/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
-        lda_model, tm_dictionary = pickle.load(f)
-except FileNotFoundError:
-    with open('/content/LdaSummarization/lda_model_large_2020_12_08.pkl', 'rb') as f:
-        lda_model, tm_dictionary = pickle.load(f)
-
-wn_lemmatizer = nltk.WordNetLemmatizer()
-
-lda_topics = lda_model.show_topics(num_topics=-1, num_words=10)
-
-topics_words = []
-filters = [lambda x: x.lower(), strip_punctuation, strip_numeric]
-
-step_n = 0
-
-for topic in lda_topics:
-    print(topic)
-    topics_words.append(preprocess_string(topic[1], filters))
-
-
-def lemmatize(text):#lemmatize_stemming(text):
-    return wn_lemmatizer.lemmatize(text, pos='v')  # stemmer.stem(WordNetLemmatizer().lemmatize(text, pos='v'))
-
-
-def preprocess(text):
-    result = []
-    for token in gensim.utils.simple_preprocess(text):
-        if token not in gensim.parsing.preprocessing.STOPWORDS and len(token) > 3:
-            result.append(lemmatize(token))
-    return result
-
-
-preprocessed_vocab = [preprocess(x) for x in tokenizer.vocab.keys()]
-preprocessed_vocab = [x[0] if len(x) > 0 else None for x in preprocessed_vocab]
-
-topics_words_indexes = [[
-    next(index for index, word in enumerate(preprocessed_vocab) if word == x) for x in y
-] for y in topics_words]
-
-
-def abs_loss(generator, topical_output, symbols, vocab_size, device, train=True, label_smoothing=0.0):
+def abs_loss(generator, symbols, vocab_size, device, train=True, label_smoothing=0.0):
     compute = NMTLossCompute(
-        generator, topical_output, symbols, vocab_size,
+        generator, symbols, vocab_size,
         label_smoothing=label_smoothing if train else 0.0)
     compute.to(device)
     return compute
@@ -78,12 +25,9 @@ class LossComputeBase(nn.Module):
     Class for managing efficient loss computation. Handles
     sharding next step predictions and accumulating mutiple
     loss computations
-
-
     Users can implement their own loss computation strategy by making
     subclass of this one.  Users need to implement the _compute_loss()
     and make_shard_state() methods.
-
     Args:
         generator (:obj:`nn.Module`) :
              module that maps the output of the decoder to a
@@ -93,10 +37,9 @@ class LossComputeBase(nn.Module):
         normalzation (str): normalize by "sents" or "tokens"
     """
 
-    def __init__(self, generator, topical_output, pad_id):
+    def __init__(self, generator, pad_id):
         super(LossComputeBase, self).__init__()
         self.generator = generator
-        self.topical_output = topical_output
         self.padding_idx = pad_id
 
 
@@ -118,9 +61,7 @@ class LossComputeBase(nn.Module):
     def _compute_loss(self, batch, output, target, **kwargs):
         """
         Compute the loss. Subclass must define this method.
-
         Args:
-
             batch: the current batch.
             output: the predict output from the model.
             target: the validate target to compare output with.
@@ -131,7 +72,6 @@ class LossComputeBase(nn.Module):
     def monolithic_compute_loss(self, batch, output):
         """
         Compute the forward loss for the batch.
-
         Args:
           batch (batch): batch of labeled examples
           output (:obj:`FloatTensor`):
@@ -152,16 +92,13 @@ class LossComputeBase(nn.Module):
                              normalization):
         """Compute the forward loss and backpropagate.  Computation is done
         with shards and optionally truncation for memory efficiency.
-
         Also supports truncated BPTT for long sequences by taking a
         range in the decoder output sequence to back propagate in.
         Range is from `(cur_trunc, cur_trunc + trunc_size)`.
-
         Note sharding is an exact efficiency trick to relieve memory
         required for the generation buffers. Truncation is an
         approximate efficiency trick to relieve the memory required
         in the RNN buffers.
-
         Args:
           batch (batch) : batch of labeled examples
           output (:obj:`FloatTensor`) :
@@ -172,10 +109,8 @@ class LossComputeBase(nn.Module):
           trunc_size (int) : length of truncation window
           shard_size (int) : maximum number of examples in a shard
           normalization (int) : Loss is divided by this number
-
         Returns:
             :obj:`onmt.utils.Statistics`: validation loss statistics
-
         """
         batch_stats = Statistics()
         shard_state = self._make_shard_state(batch, output)
@@ -192,7 +127,6 @@ class LossComputeBase(nn.Module):
             loss (:obj:`FloatTensor`): the loss computed by the loss criterion.
             scores (:obj:`FloatTensor`): a score for each possible output
             target (:obj:`FloatTensor`): true targets
-
         Returns:
             :obj:`onmt.utils.Statistics` : statistics for this batch.
         """
@@ -229,89 +163,16 @@ class LabelSmoothingLoss(nn.Module):
         self.register_buffer('one_hot', one_hot.unsqueeze(0))
         self.confidence = 1.0 - label_smoothing
 
-        self.cosine_embedding_loss = nn.CosineEmbeddingLoss()
-
-    def pgloss(self, src, trg, reward):
-        """
-        Returns a policy gradient loss
-        :param src: seq_len
-        :param trg: seq_len
-        :param reward: batch_size (discriminator reward for each sentence, applied to each token of the corresponding sentence)
-        :return loss: policy loss
-        """
-
-        srq_len, batch_size = src.size()
-
-        out = self.forward(src, trg,
-                           teacher_forcing_ratio=0.5).permute(1, 0, 2)  # batch * seq * vocab
-        out = F.log_softmax(out, dim=2)
-        target_onehot = F.one_hot(trg.permute(1, 0), self.encoder.input_dim).float()  # batch * seq * vocab
-        pred = torch.sum(out * target_onehot, dim=-1)  # batch_size * seq_len
-        pred = torch.sum(pred, dim=-1)
-        loss = -torch.sum(pred * reward)
-
-        return loss / batch_size
-
-    def forward(self, output_param, target_param, generator, topical_output, src_topics):
+    def forward(self, output, target):
         """
         output (FloatTensor): batch_size x n_classes
         target (LongTensor): batch_size
         """
-        loss = 0
+        model_prob = self.one_hot.repeat(target.size(0), 1)
+        model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
+        model_prob.masked_fill_((target == self.padding_idx).unsqueeze(1), 0)
 
-        for i in range(output_param.shape[0]):
-            output = generator(output_param[i])
-            target = target_param[i]
-
-            model_prob = self.one_hot.repeat(target.size(0), 1)
-            model_prob.scatter_(1, target.unsqueeze(1), self.confidence)
-            model_prob.masked_fill_((target == self.padding_idx).unsqueeze(1), 0)
-
-            # ---- calculate reward ----
-            output_text = tokenizer.convert_ids_to_tokens(output.argmax(1).tolist())
-
-            output_bow_vector = tm_dictionary.doc2bow(preprocess(' '.join(output_text)))
-            output_article_topic = sorted(lda_model[output_bow_vector], key=lambda tup: -1 * tup[1])
-
-            target_topics_one_hot = torch.zeros(len(topics_words))
-            output_topics_one_hot = torch.zeros(len(topics_words))
-
-            top_target_topic = sorted(src_topics, key=lambda tup: -1 * tup[1])[0]
-            target_topics_one_hot[top_target_topic[0]] = torch.FloatTensor([1])
-            # for index, value in src_topics:
-            #     target_topics_one_hot[index] = torch.FloatTensor([value])
-
-            top_output_topic = sorted(output_article_topic, key=lambda tup: -1 * tup[1])[0]
-            output_topics_one_hot[top_output_topic[0]] = torch.FloatTensor([top_output_topic[1]])
-            # for index, value in output_article_topic:
-            #     output_topics_one_hot[index] = torch.FloatTensor([value])
-
-            # more divergence - less reward
-            reward = -(F.binary_cross_entropy(output_topics_one_hot, target_topics_one_hot) ** 2)
-            # ---- end of reward calculation ----
-
-            vanilla_loss = F.kl_div(output, model_prob, reduction='sum')
-
-            rl_loss = torch.sum(output * reward, dtype=torch.float)
-            #rl_loss = -0.05 * rl_loss
-
-            rl_loss_percentage = 0.5
-
-            # rl_loss * x = rl_loss_percentage * vanilla_loss  =>  x = rl_loss_percentage * vanilla_loss / rl_loss
-            rl_coeff = float(rl_loss_percentage * vanilla_loss / rl_loss)
-
-            loss += (vanilla_loss * (1 - rl_loss_percentage) + rl_loss * rl_coeff)
-
-            global step_n
-            if step_n % 1000 == 0:
-                target_text = tokenizer.convert_ids_to_tokens(target.tolist())
-                print('Loss: vanilla: {} ({}), rl: {} ({}), {}\nTarget:\n{}\n\nOutput:\n{}'.format(
-                    vanilla_loss, (1 - rl_loss_percentage) * vanilla_loss, rl_loss, rl_loss * rl_coeff, loss, ' '.join(target_text), ' '.join(output_text)
-                    ), '\n')
-
-            step_n += 1
-
-        return loss
+        return F.kl_div(output, model_prob, reduction='sum')
 
 
 class NMTLossCompute(LossComputeBase):
@@ -319,22 +180,18 @@ class NMTLossCompute(LossComputeBase):
     Standard NMT Loss Computation.
     """
 
-    def __init__(self, generator, topical_output, symbols, vocab_size,
+    def __init__(self, generator, symbols, vocab_size,
                  label_smoothing=0.0):
-        super(NMTLossCompute, self).__init__(generator, topical_output, symbols['PAD'])
+        super(NMTLossCompute, self).__init__(generator, symbols['PAD'])
         self.sparse = not isinstance(generator[1], nn.LogSoftmax)
-
         if label_smoothing > 0:
-            criterion = LabelSmoothingLoss(
+            self.criterion = LabelSmoothingLoss(
                 label_smoothing, vocab_size, ignore_index=self.padding_idx
             )
         else:
-            raise NotImplementedError()
-            # criterion = nn.NLLLoss(
-            #     ignore_index=self.padding_idx, reduction='sum'
-            # )
-
-        self.criterion = criterion
+            self.criterion = nn.NLLLoss(
+                ignore_index=self.padding_idx, reduction='sum'
+            )
 
     def _make_shard_state(self, batch, output):
         return {
@@ -347,7 +204,7 @@ class NMTLossCompute(LossComputeBase):
         scores = self.generator(bottled_output)
         gtruth =target.contiguous().view(-1)
 
-        loss = self.criterion(output, target, self.generator, self.topical_output, batch.topics)
+        loss = self.criterion(scores, gtruth)
 
         stats = self._stats(loss.clone(), scores, gtruth)
 
@@ -379,10 +236,8 @@ def shards(state, shard_size, eval_only=False):
         shard_size: The maximum size of the shards yielded by the model.
         eval_only: If True, only yield the state, nothing else.
               Otherwise, yield shards.
-
     Yields:
         Each yielded shard is a dict.
-
     Side effect:
         After the last shard, this function does back-propagation.
     """
