@@ -225,7 +225,7 @@ class DataIterator(object):
             raise NotImplementedError()
 
         end_id = [src[-1]]
-        src = src[:-1][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
+        src = src[:-2][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
@@ -342,7 +342,7 @@ class TextDataloader(object):
             raise NotImplementedError()
 
         end_id = [src[-1]]
-        src = src[:-1][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
+        src = src[:-2][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
