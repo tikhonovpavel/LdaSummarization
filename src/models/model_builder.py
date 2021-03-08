@@ -153,13 +153,13 @@ class Bert(nn.Module):
 
         self.finetune = finetune
 
-    def forward(self, x, segs, mask):
+    def forward(self, x, segs, mask, topics):
         if(self.finetune):
-            top_vec, _ = self.model(x, segs, attention_mask=mask)
+            top_vec, _ = self.model(x, segs, attention_mask=mask, topics=topics)
         else:
             self.eval()
             with torch.no_grad():
-                top_vec, _ = self.model(x, segs, attention_mask=mask)
+                top_vec, _ = self.model(x, segs, attention_mask=mask, topics=topics)
         return top_vec
 
 
@@ -288,8 +288,8 @@ class AbsSummarizer(nn.Module):
     #
     #     return result
 
-    def forward(self, src, tgt, segs, clss, mask_src, mask_tgt, mask_cls):
-        top_vec = self.bert(src, segs, mask_src)
+    def forward(self, src, tgt, segs, clss, mask_src, mask_tgt, mask_cls, topics):
+        top_vec = self.bert(src, segs, mask_src, topics)
 
         # for i, b in enumerate(tgt):
         #     tgt_txt = tokenizer.convert_ids_to_tokens(b.tolist())

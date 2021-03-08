@@ -4,12 +4,11 @@ import glob
 import random
 
 import torch
-from pytorch_transformers import BertTokenizer
 
 from others.logging import logger
 
-
-tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+import numpy as np
+np.random.seed(2018)
 
 
 class Batch(object):
@@ -67,11 +66,16 @@ class Batch(object):
             setattr(self, 'mask_tgt', mask_tgt.to(device))
 
 
-            if (is_test):
-                src_str = [x[-2] for x in data]
+            # setattr(self, 'topics', topics.to(device))
+
+
+            if (is_test) or True:
+                src_str = [x[-3] for x in data]
                 setattr(self, 'src_str', src_str)
-                tgt_str = [x[-1] for x in data]
+                tgt_str = [x[-2] for x in data]
                 setattr(self, 'tgt_str', tgt_str)
+                topics = [x[-1] for x in data]
+                setattr(self, 'topics', topics)
 
     def __len__(self):
         return self.batch_size
@@ -90,7 +94,7 @@ def load_dataset(args, corpus_type, shuffle):
     """
     assert corpus_type in ["train", "valid", "test"]
 
-    def _lazy_dataset_loader(pt_file, corpus_type):
+    def _lazy_dataset_loader(pt_file, corpus_type, use_topic_modelling):
         dataset = torch.load(pt_file)
         logger.info('Loading %s dataset from %s, number of examples: %d' %
                     (corpus_type, pt_file, len(dataset)))
@@ -103,11 +107,11 @@ def load_dataset(args, corpus_type, shuffle):
             random.shuffle(pts)
 
         for pt in pts:
-            yield _lazy_dataset_loader(pt, corpus_type)
+            yield _lazy_dataset_loader(pt, corpus_type, args.use_topic_modelling)
     else:
         # Only one inputters.*Dataset, simple!
         pt = args.bert_data_path + '.' + corpus_type + '.pt'
-        yield _lazy_dataset_loader(pt, corpus_type)
+        yield _lazy_dataset_loader(pt, corpus_type, args.use_topic_modelling)
 
 
 def abs_batch_size_fn(new, count):
@@ -149,6 +153,7 @@ class Dataloader(object):
         self.device = device
         self.shuffle = shuffle
         self.is_test = is_test
+        self.use_topic_modelling = args.use_topic_modelling
         self.cur_iter = self._next_dataset_iterator(datasets)
         assert self.cur_iter is not None
 
@@ -217,15 +222,14 @@ class DataIterator(object):
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
 
-        if isinstance(ex['topics'], tuple):
-            topic_n = ex['topics'][0]
-        elif isinstance(ex['topics'], list):
-            topic_n = max(ex['topics'], key=lambda x: x[1])[0]
-        else:
-            raise NotImplementedError()
+        try:
+            topics = ex['topics']
+        except KeyError:
+            print('Warning: topics are not presented!')
+            topics = None
 
         end_id = [src[-1]]
-        src = src[:-2][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
+        src = src[:-1][:self.args.max_pos - 1] + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
@@ -235,9 +239,9 @@ class DataIterator(object):
 
 
         if(is_test):
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
         else:
-            return src, tgt, segs, clss, src_sent_labels
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
 
     def batch_buffer(self, data, batch_size):
         minibatch, size_so_far = [], 0
@@ -333,16 +337,10 @@ class TextDataloader(object):
         clss = ex['clss']
         src_txt = ex['src_txt']
         tgt_txt = ex['tgt_txt']
-
-        if isinstance(ex['topics'], tuple):
-            topic_n = ex['topics'][0]
-        elif isinstance(ex['topics'], list):
-            topic_n = max(ex['topics'], key=lambda x: x[1])[0]
-        else:
-            raise NotImplementedError()
+        topics = ex['topics']
 
         end_id = [src[-1]]
-        src = src[:-2][:self.args.max_pos - 2] + [tokenizer.vocab['[unused{}]'.format(2 + 1 + topic_n)]] + end_id
+        src = src[:-1][:self.args.max_pos - 1] + end_id
         segs = segs[:self.args.max_pos]
         max_sent_id = bisect.bisect_left(clss, self.args.max_pos)
         src_sent_labels = src_sent_labels[:max_sent_id]
@@ -350,9 +348,9 @@ class TextDataloader(object):
         # src_txt = src_txt[:max_sent_id]
 
         if (is_test):
-            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
         else:
-            return src, tgt, segs, clss, src_sent_labels
+            return src, tgt, segs, clss, src_sent_labels, src_txt, tgt_txt, topics
 
     def batch_buffer(self, data, batch_size):
         minibatch, size_so_far = [], 0

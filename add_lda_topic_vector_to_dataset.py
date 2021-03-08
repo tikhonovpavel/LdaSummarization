@@ -29,9 +29,12 @@ def preprocess(text):
             result.append(lemmatize(token))
     return result
 
+MODE = 'train'
+
+assert MODE in ('train', 'valid', 'test')
 
 limit = 9999999
-pt_files = sorted(glob.glob('F:/workspace/LdaSummarization/bert_data/cnndm' + '.' + 'train' + '.[0-9]*.pt'))[:limit]
+pt_files = sorted(glob.glob('F:/workspace/LdaSummarization/bert_data/cnndm' + '.' + MODE + '.[0-9]*.pt'))[:limit]
 
 for pt in tqdm(pt_files):
     pt_result = []
