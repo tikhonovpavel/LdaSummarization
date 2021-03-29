@@ -231,8 +231,9 @@ class Translator(object):
         src = batch.src
         segs = batch.segs
         mask_src = batch.mask_src
+        topics = batch.topics
 
-        src_features = self.model.bert(src, segs, mask_src)
+        src_features = self.model.bert(src, segs, mask_src, topics)
         dec_states = self.model.decoder.init_decoder_state(src, src_features, with_cache=True)
         device = src_features.device
 

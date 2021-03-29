@@ -153,7 +153,9 @@ class Bert(nn.Module):
 
         self.finetune = finetune
 
-    def forward(self, x, segs, mask, topics):
+    def forward(self, x, segs, mask, topics, **kwargs):
+        # topics = self.topics#kwargs['topics']#kwargs.get('topics', [(1, 0) for x in range(len(x))])
+
         if(self.finetune):
             top_vec, _ = self.model(x, segs, attention_mask=mask, topics=topics)
         else:

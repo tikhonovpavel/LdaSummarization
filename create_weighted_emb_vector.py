@@ -41,6 +41,3 @@ for t in range(lda_model.num_topics):
 
         topics_weighted_embeddings[t] += emb[word_index] * row.prob
 
-
-
-print(result)
