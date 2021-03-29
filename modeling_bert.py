@@ -736,16 +736,24 @@ class BertModel(BertPreTrainedModel):
             # percents_left = 1 - sum(x[1] for x in topics[batch])
             # topic_batch =
 
-            print('topics:', topics)
+            # print('topics:', topics)
 
             try:
                 if isinstance(topics[batch], list):
                     for topic, topic_prob in topics[batch]:
-                        embedding_output[batch][-2] += weighted_emb_vector[topic] * topic_prob
+                        if torch.cuda.is_available():
+                            embedding_output[batch][-2] += weighted_emb_vector[topic].to('cuda') * topic_prob
+                        else:
+                            embedding_output[batch][-2] += weighted_emb_vector[topic] * topic_prob
                 else:
                     topic = topics[batch]
                     topic_prob = 1
-                    embedding_output[batch][-2] += weighted_emb_vector[topic] * topic_prob
+
+                    if torch.cuda.is_available():
+                        embedding_output[batch][-2] += weighted_emb_vector[topic].to('cuda') * topic_prob
+                    else:
+                        embedding_output[batch][-2] += weighted_emb_vector[topic] * topic_prob
+
             except Exception as err:
                 print(err)
 
